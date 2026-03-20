@@ -8,9 +8,19 @@ const config: Config = {
   ],
   theme: {
     extend: {
+      fontFamily: {
+        sans: ["var(--font-sans)", "system-ui"],
+        mono: ["var(--font-mono)", "monospace"],
+      },
       colors: {
-        background: "var(--background)",
-        foreground: "var(--foreground)",
+        background: "#0a0c10",
+        surface: "#111318",
+        border: "#1e2330",
+        accent: "#e84b3a",
+        "accent-dim": "#7f2318",
+        muted: "#4a5168",
+        text: "#d4d8e8",
+        "text-dim": "#6b7280",
       },
     },
   },

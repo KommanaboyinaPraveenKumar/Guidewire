@@ -1,0 +1,106 @@
+generator client {
+  provider = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String
+  email         String    @unique
+  password      String
+  role          String    @default("USER")
+  createdAt     DateTime  @default(now())
+  claims        Claim[]
+  sessions      Session[]
+  accounts      Account[]
+}
+
+model Claim {
+  id                       String   @id @default(cuid())
+  userId                   String
+  user                     User     @relation(fields: [userId], references: [id])
+  months_as_customer       Float
+  age                      Float
+  policy_bind_date         String
+  policy_annual_premium    Float
+  umbrella_limit           Float    @default(0)
+  incident_type            String
+  collision_type           String
+  incident_severity        String
+  authorities_contacted    String
+  incident_hour_of_the_day Float
+  number_of_vehicles_involved Float
+  property_damage          String
+  bodily_injuries          Float    @default(0)
+  witnesses                Float
+  police_report_available  String
+  total_claim_amount       Float
+  injury_claim             Float
+  property_claim           Float
+  vehicle_claim            Float
+  auto_year                Float
+  capital_gains            Float    @default(0)
+  capital_loss             Float    @default(0)
+  policy_deductable        Float    @default(1000)
+  fraud_probability        Float
+  riskScore                Float
+  riskLevel                String
+  is_fraud                 Boolean  @default(false)
+  flags                    String   @default("[]")
+  recommendation           String
+  status                   String   @default("PENDING")
+  adminNote                String?
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+}
+
+model ModelWeights {
+  id               String  @id @default(cuid())
+  gpsConsistency   Float
+  deviceIntegrity  Float
+  claimBurstScore  Float
+  networkOverlap   Float
+  motionCoherence  Float
+  normalizedAmount Float
+  priorClaimsRate  Float
+  descriptionLen   Float
+  bias             Float
+  trainedAt        DateTime @default(now())
+  sampleCount      Int
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+  @@unique([identifier, token])
+}

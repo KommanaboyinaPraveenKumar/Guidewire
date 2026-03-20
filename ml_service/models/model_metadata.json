@@ -1,0 +1,83 @@
+{
+  "model_type": "AdaBoost",
+  "threshold": 0.35,
+  "features": [
+    "incident_severity_encoded",
+    "policy_annual_premium",
+    "policy_age_years",
+    "vehicle_ratio",
+    "property_claim",
+    "injury_ratio",
+    "months_as_customer",
+    "vehicle_claim",
+    "capital-gains",
+    "incident_hour_of_the_day",
+    "injury_claim",
+    "total_claim_amount",
+    "auto_year",
+    "capital-loss",
+    "age",
+    "witnesses",
+    "police_report_encoded",
+    "authorities_encoded",
+    "number_of_vehicles_involved",
+    "property_damage_encoded",
+    "incident_type_encoded",
+    "policy_deductable",
+    "collision_encoded"
+  ],
+  "feature_encodings": {
+    "incident_severity": {
+      "Trivial Damage": 0,
+      "Minor Damage": 1,
+      "Total Loss": 2,
+      "Major Damage": 3
+    },
+    "authorities_contacted": {
+      "Police": 1,
+      "None": 0,
+      "Fire": 2,
+      "Other": 3,
+      "Ambulance": 2
+    },
+    "police_report_available": {
+      "YES": 1,
+      "NO": 0,
+      "?": -1
+    },
+    "property_damage": {
+      "YES": 1,
+      "NO": 0,
+      "?": -1
+    },
+    "collision_type": {
+      "Front Collision": 1,
+      "Rear Collision": 2,
+      "Side Collision": 3,
+      "?": 0
+    },
+    "incident_type": {
+      "Single Vehicle Collision": 0,
+      "Multi-vehicle Collision": 1,
+      "Vehicle Theft": 2,
+      "Parked Car": 3
+    }
+  },
+  "derived_features": {
+    "policy_age_years": "days_since_policy_bind / 365",
+    "injury_ratio": "injury_claim / (total_claim_amount + 1)",
+    "vehicle_ratio": "vehicle_claim / (total_claim_amount + 1)",
+    "property_ratio": "property_claim / (total_claim_amount + 1)"
+  },
+  "performance": {
+    "test_auc": 0.7726,
+    "accuracy": 0.83,
+    "f1_fraud": 0.6792,
+    "threshold_used": 0.35
+  },
+  "best_params": {
+    "n_estimators": 200,
+    "learning_rate": 0.1,
+    "algorithm": "SAMME"
+  }
+}
