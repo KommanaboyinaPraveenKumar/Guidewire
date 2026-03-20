@@ -126,7 +126,7 @@ No single signal blocks a claim. The composite risk score draws from physics coh
 ## Project Structure
 
 ```
-claim-secure/
+GuideWire/
 ├── app/                          # Next.js app router
 │   ├── api/                      # API routes
 │   │   ├── analyze-claim/        # ML prediction endpoint
@@ -186,8 +186,8 @@ claim-secure/
 ### Frontend Setup
 
 ```bash
-git clone https://github.com/yourusername/claim-secure.git
-cd claim-secure
+git clone https://github.com/yourusername/Guidewire.git
+cd Guidewire
 npm install
 npx prisma generate
 npx prisma db push
