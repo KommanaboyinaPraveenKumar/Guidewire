@@ -12,18 +12,18 @@ Claim-Secure provides insurers with an intelligent risk assessment platform that
 - Displays comprehensive dashboards for claims management and analysis
 
 **Key Features:**
-- 🔐 Secure authentication with NextAuth (JWT-based)
-- 🤖 Multi-field fraud detection using AdaBoost ML model (83% accuracy, 0.77 AUC)
-- 📊 Real-time risk scoring and visualization
-- 💾 Claims database with Prisma ORM (SQLite)
-- 📈 Analytics dashboard with risk distribution charts
-- 🎯 Granular fraud flags and recommendations
-- 🔄 Admin panel for claim review and management
-- 🛡️ Adversarial defense layer against GPS spoofing and coordinated fraud rings
+-  Secure authentication with NextAuth (JWT-based)
+-  Multi-field fraud detection using AdaBoost ML model (83% accuracy, 0.77 AUC)
+-  Real-time risk scoring and visualization
+-  Claims database with Prisma ORM (SQLite)
+-  Analytics dashboard with risk distribution charts
+-  Granular fraud flags and recommendations
+-  Admin panel for claim review and management
+- Adversarial defense layer against GPS spoofing and coordinated fraud rings
 
 ---
 
-## ⚠️ Adversarial Defense & Anti-Spoofing Strategy
+##  Adversarial Defense & Anti-Spoofing Strategy
 
 > **Critical Threat — March 2026:** A coordinated syndicate of 500 delivery workers in a tier-1 city successfully exploited a parametric insurance platform by using GPS-spoofing applications to fake their locations during a declared weather event, triggering mass false payouts and draining the liquidity pool. Claim-Secure's architecture is designed to defeat this attack vector at every layer.
 
