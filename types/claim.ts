@@ -1,4 +1,5 @@
 export type RiskLevel = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+export type ClaimStatus = "PENDING" | "INFO_REQUESTED" | "APPROVED" | "REJECTED";
 
 export interface ClaimInput {
   months_as_customer: number;
@@ -40,4 +41,8 @@ export interface MLPredictionResponse {
 export interface ClaimResult extends MLPredictionResponse, ClaimInput {
   id: string;
   timestamp: string;
+  status?: ClaimStatus;
+  adminNote?: string | null;
+  infoRequestNote?: string | null;
+  additionalDescription?: string | null;
 }

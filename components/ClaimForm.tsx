@@ -25,14 +25,52 @@ export default function ClaimForm() {
   const set = (k: keyof ClaimInput, v: string | number) =>
     setForm((f) => ({ ...f, [k]: v }));
 
+  const toNumber = (value: unknown) => {
+    const parsed = Number(value ?? 0);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+
+  const monthsAsCustomer = (() => {
+    if (!form.policy_bind_date) return 0;
+    const bindDate = new Date(form.policy_bind_date);
+    if (Number.isNaN(bindDate.getTime())) return 0;
+
+    const now = new Date();
+    let months = (now.getFullYear() - bindDate.getFullYear()) * 12;
+    months += now.getMonth() - bindDate.getMonth();
+    if (now.getDate() < bindDate.getDate()) months -= 1;
+    return Math.max(0, months);
+  })();
+
+  const totalClaimAmount =
+    toNumber(form.injury_claim) + toNumber(form.property_claim) + toNumber(form.vehicle_claim);
+
   const handleSubmit = async () => {
     setLoading(true);
     setError("");
+
+    if (!form.policy_bind_date) {
+      setError("Policy bind date is required.");
+      setLoading(false);
+      return;
+    }
+
+    const payload: Partial<ClaimInput> = {
+      ...form,
+      months_as_customer: monthsAsCustomer,
+      total_claim_amount: totalClaimAmount,
+      umbrella_limit: toNumber(form.umbrella_limit),
+      bodily_injuries: toNumber(form.bodily_injuries),
+      capital_gains: toNumber(form.capital_gains),
+      capital_loss: toNumber(form.capital_loss),
+      policy_deductable: toNumber(form.policy_deductable || 1000),
+    };
+
     try {
       const res = await fetch("/api/analyze-claim", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify(payload),
       });
       if (!res.ok) {
         const errData = await res.json();
@@ -66,8 +104,12 @@ export default function ClaimForm() {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className={labelClass}>Months as Customer</label>
-              <input type="number" className={inputClass} placeholder="0"
-                onChange={(e) => set("months_as_customer", Number(e.target.value))} />
+              <input
+                type="number"
+                className={`${inputClass} opacity-80`}
+                value={monthsAsCustomer}
+                readOnly
+              />
             </div>
             <div>
               <label className={labelClass}>Age</label>
@@ -155,8 +197,12 @@ export default function ClaimForm() {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className={labelClass}>Total Claim Amount ($)</label>
-              <input type="number" className={inputClass} placeholder="0"
-                onChange={(e) => set("total_claim_amount", Number(e.target.value))} />
+              <input
+                type="number"
+                className={`${inputClass} opacity-80`}
+                value={totalClaimAmount}
+                readOnly
+              />
             </div>
             <div>
               <label className={labelClass}>Injury Claim ($)</label>

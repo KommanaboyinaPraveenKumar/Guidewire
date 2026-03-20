@@ -10,15 +10,15 @@
 * { box-sizing: border-box; }
 
 body {
-  background-color: #0a0c10;
-  color: #d4d8e8;
+  background-color: #0b0f17;
+  color: #f3f6ff;
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
 }
 
 ::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: #111318; }
-::-webkit-scrollbar-thumb { background: #1e2330; border-radius: 3px; }
+::-webkit-scrollbar-track { background: #131a24; }
+::-webkit-scrollbar-thumb { background: #2a3342; border-radius: 3px; }
 
 @keyframes pulse-ring {
   0%, 100% { opacity: 1; }

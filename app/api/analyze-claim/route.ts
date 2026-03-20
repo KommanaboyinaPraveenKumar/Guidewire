@@ -6,12 +6,33 @@ import type { ClaimInput, MLPredictionResponse } from "@/types/claim";
 
 const ML_SERVICE_URL = process.env.ML_SERVICE_URL || "http://localhost:8000";
 
+function toNumber(value: unknown, fallback = 0) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function calculateMonthsAsCustomer(bindDate: string) {
+  const date = new Date(bindDate);
+  if (Number.isNaN(date.getTime())) return 0;
+
+  const now = new Date();
+  let months = (now.getFullYear() - date.getFullYear()) * 12;
+  months += now.getMonth() - date.getMonth();
+  if (now.getDate() < date.getDate()) months -= 1;
+  return Math.max(0, months);
+}
+
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body: ClaimInput = await req.json();
   const userId = session.user.id;
+  const injuryClaim = toNumber(body.injury_claim);
+  const propertyClaim = toNumber(body.property_claim);
+  const vehicleClaim = toNumber(body.vehicle_claim);
+  const totalClaimAmount = injuryClaim + propertyClaim + vehicleClaim;
+  const monthsAsCustomer = calculateMonthsAsCustomer(body.policy_bind_date);
   
   // Verify user exists in database
   const userExists = await prisma.user.findUnique({ where: { id: userId } });
@@ -43,10 +64,10 @@ export async function POST(req: NextRequest) {
         bodily_injuries: body.bodily_injuries ?? 0,
         witnesses: body.witnesses,
         police_report_available: body.police_report_available,
-        total_claim_amount: body.total_claim_amount,
-        injury_claim: body.injury_claim,
-        property_claim: body.property_claim,
-        vehicle_claim: body.vehicle_claim,
+        total_claim_amount: totalClaimAmount,
+        injury_claim: injuryClaim,
+        property_claim: propertyClaim,
+        vehicle_claim: vehicleClaim,
         auto_year: body.auto_year,
         capital_gains: body.capital_gains ?? 0,
         capital_loss: body.capital_loss ?? 0,
@@ -69,7 +90,7 @@ export async function POST(req: NextRequest) {
     const claim = await prisma.claim.create({
       data: {
         userId,
-        months_as_customer: body.months_as_customer,
+        months_as_customer: monthsAsCustomer,
         age: body.age,
         policy_bind_date: body.policy_bind_date,
         policy_annual_premium: body.policy_annual_premium,
@@ -84,10 +105,10 @@ export async function POST(req: NextRequest) {
         bodily_injuries: body.bodily_injuries || 0,
         witnesses: body.witnesses,
         police_report_available: body.police_report_available,
-        total_claim_amount: body.total_claim_amount,
-        injury_claim: body.injury_claim,
-        property_claim: body.property_claim,
-        vehicle_claim: body.vehicle_claim,
+        total_claim_amount: totalClaimAmount,
+        injury_claim: injuryClaim,
+        property_claim: propertyClaim,
+        vehicle_claim: vehicleClaim,
         auto_year: body.auto_year,
         capital_gains: body.capital_gains || 0,
         capital_loss: body.capital_loss || 0,
@@ -98,7 +119,7 @@ export async function POST(req: NextRequest) {
         is_fraud: ml.is_fraud,
         flags: JSON.stringify(ml.flags),
         recommendation: ml.recommendation,
-        status: ml.risk_level === "CRITICAL" ? "FLAGGED" : "PENDING",
+        status: "PENDING",
       },
     });
 
@@ -110,6 +131,7 @@ export async function POST(req: NextRequest) {
       is_fraud: ml.is_fraud,
       flags: ml.flags,
       recommendation: ml.recommendation,
+      status: claim.status,
       timestamp: claim.createdAt.toISOString(),
     });
   } catch (error: any) {
@@ -133,8 +155,72 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json(
     claims.map((c) => ({
-      ...c,
+      id: c.id,
+      months_as_customer: c.months_as_customer,
+      age: c.age,
+      policy_bind_date: c.policy_bind_date,
+      policy_annual_premium: c.policy_annual_premium,
+      umbrella_limit: c.umbrella_limit,
+      incident_type: c.incident_type,
+      collision_type: c.collision_type,
+      incident_severity: c.incident_severity,
+      authorities_contacted: c.authorities_contacted,
+      incident_hour_of_the_day: c.incident_hour_of_the_day,
+      number_of_vehicles_involved: c.number_of_vehicles_involved,
+      property_damage: c.property_damage,
+      bodily_injuries: c.bodily_injuries,
+      witnesses: c.witnesses,
+      police_report_available: c.police_report_available,
+      total_claim_amount: c.total_claim_amount,
+      injury_claim: c.injury_claim,
+      property_claim: c.property_claim,
+      vehicle_claim: c.vehicle_claim,
+      auto_year: c.auto_year,
+      capital_gains: c.capital_gains,
+      capital_loss: c.capital_loss,
+      policy_deductable: c.policy_deductable,
+      fraud_probability: c.fraud_probability,
+      risk_score: c.riskScore,
+      risk_level: c.riskLevel,
+      is_fraud: c.is_fraud,
       flags: JSON.parse(c.flags),
+      recommendation: c.recommendation,
+      status: c.status,
+      adminNote: c.adminNote,
+      infoRequestNote: c.infoRequestNote,
+      additionalDescription: c.additionalDescription,
+      timestamp: c.createdAt.toISOString(),
     }))
   );
+}
+
+export async function PATCH(req: NextRequest) {
+  const session = await getServerSession(authOptions);
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const { claimId, additionalDescription } = await req.json();
+  if (!claimId) return NextResponse.json({ error: "Claim id is required" }, { status: 400 });
+
+  const claim = await prisma.claim.findUnique({ where: { id: claimId } });
+  if (!claim || claim.userId !== session.user.id) {
+    return NextResponse.json({ error: "Claim not found" }, { status: 404 });
+  }
+
+  if (claim.status !== "INFO_REQUESTED") {
+    return NextResponse.json({ error: "This claim is not awaiting additional info" }, { status: 400 });
+  }
+
+  const updated = await prisma.claim.update({
+    where: { id: claimId },
+    data: {
+      additionalDescription: String(additionalDescription || "").trim(),
+      status: "PENDING",
+    },
+  });
+
+  return NextResponse.json({
+    success: true,
+    status: updated.status,
+    additionalDescription: updated.additionalDescription,
+  });
 }

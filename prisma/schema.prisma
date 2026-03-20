@@ -54,6 +54,8 @@ model Claim {
   recommendation           String
   status                   String   @default("PENDING")
   adminNote                String?
+  infoRequestNote          String?
+  additionalDescription    String?
   createdAt                DateTime @default(now())
   updatedAt                DateTime @updatedAt
 }
