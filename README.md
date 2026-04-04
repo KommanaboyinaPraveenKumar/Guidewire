@@ -167,6 +167,21 @@ Recommended recording flow:
 - Prisma ORM
 - SQLite with libsql adapter
 
+## Setup
+
+Run these commands before starting the app:
+
+```bash
+npm install
+npx prisma generate
+```
+
+If you need to initialize or seed the database, also run:
+
+```bash
+npx prisma db seed
+```
+
 ### Legacy / Optional
 
 - `ml_service/` remains in the repo from the earlier fraud-detection implementation
