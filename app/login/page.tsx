@@ -34,7 +34,7 @@ export default function LoginPage() {
           </span>
         </div>
         <h1 className="text-2xl font-bold text-text mb-1">Sign in</h1>
-        <p className="text-text-dim text-sm mb-6">Access your fraud detection dashboard</p>
+        <p className="text-text-dim text-sm mb-6">Access your worker protection dashboard and weekly policy controls</p>
 
         {error && (
           <div className="bg-red-950 border border-red-800 text-red-400 text-sm rounded-lg px-4 py-2.5 mb-4">

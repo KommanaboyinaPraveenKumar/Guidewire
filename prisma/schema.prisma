@@ -15,6 +15,9 @@ model User {
   role          String    @default("USER")
   createdAt     DateTime  @default(now())
   claims        Claim[]
+  workerProfile WorkerProfile?
+  policies      Policy[]
+  incomeClaims  IncomeClaim[]
   sessions      Session[]
   accounts      Account[]
 }
@@ -73,6 +76,90 @@ model ModelWeights {
   bias             Float
   trainedAt        DateTime @default(now())
   sampleCount      Int
+}
+
+model WorkerProfile {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  phone           String
+  city            String
+  zone            String
+  platform        String
+  vehicleType     String
+  weeklyIncome    Float
+  avgHoursPerDay  Float
+  workDaysPerWeek Int
+  upiId           String
+  trustScore      Float    @default(0.72)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  policies        Policy[]
+}
+
+model Policy {
+  id               String        @id @default(cuid())
+  userId           String
+  profileId        String
+  user             User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  profile          WorkerProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  policyNumber     String        @unique
+  status           String        @default("ACTIVE")
+  weeklyPremium    Float
+  weeklyCoverage   Float
+  coverageHours    Int
+  riskScore        Float
+  riskLevel        String
+  pricingBreakdown String        @default("[]")
+  payoutChannel    String        @default("UPI")
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  incomeClaims     IncomeClaim[]
+}
+
+model TriggerEvent {
+  id               String        @id @default(cuid())
+  externalId       String        @unique
+  type             String
+  severity         String
+  city             String
+  zone             String
+  source           String
+  title            String
+  description      String
+  impactHours      Float
+  payoutMultiplier Float
+  isActive         Boolean       @default(true)
+  startsAt         DateTime
+  endsAt           DateTime
+  metadata         String        @default("{}")
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  incomeClaims     IncomeClaim[]
+}
+
+model IncomeClaim {
+  id                 String       @id @default(cuid())
+  userId             String
+  policyId           String
+  triggerEventId     String
+  user               User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  policy             Policy       @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  triggerEvent       TriggerEvent @relation(fields: [triggerEventId], references: [id], onDelete: Cascade)
+  status             String       @default("AUTO_INITIATED")
+  estimatedIncomeLoss Float
+  approvedPayout     Float
+  fraudScore         Float
+  fraudLevel         String
+  fraudFlags         String       @default("[]")
+  validationSummary  String
+  payoutReference    String?
+  payoutChannel      String       @default("UPI")
+  triggerSnapshot    String       @default("{}")
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+
+  @@unique([policyId, triggerEventId])
 }
 
 model Account {

@@ -1,20 +1,21 @@
 "use client";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { Shield, LogOut } from "lucide-react";
 import { useSession, signOut } from "next-auth/react";
 
 export default function Navbar() {
   const path = usePathname();
-  const router = useRouter();
   const { data: session } = useSession();
 
-  const links = [
-    { href: "/", label: "Submit Claim" },
-    { href: "/dashboard", label: "Dashboard" },
-    { href: "/cases", label: "My Cases" },
-    ...(session?.user?.role === "ADMIN" ? [{ href: "/admin", label: "Admin" }] : []),
-  ];
+  const isAdmin = session?.user?.role === "ADMIN";
+  const links = isAdmin
+    ? [{ href: "/admin", label: "Operations" }]
+    : [
+        { href: "/", label: "Coverage" },
+        { href: "/dashboard", label: "Analytics" },
+        { href: "/cases", label: "Claims" },
+      ];
 
   return (
     <nav className="border-b border-border bg-surface/80 backdrop-blur sticky top-0 z-50">
@@ -38,6 +39,11 @@ export default function Navbar() {
           ))}
           {session ? (
             <div className="flex items-center gap-3 ml-4 pl-4 border-l border-border">
+              {isAdmin && (
+                <span className="text-[10px] font-mono tracking-[0.25em] uppercase text-accent border border-accent/30 rounded-full px-2 py-1">
+                  Admin
+                </span>
+              )}
               <span className="text-xs text-text-dim font-mono">{session.user.email}</span>
               <button onClick={() => signOut({ callbackUrl: "/login" })}
                 className="flex items-center gap-1.5 text-xs text-text-dim hover:text-accent transition-colors">

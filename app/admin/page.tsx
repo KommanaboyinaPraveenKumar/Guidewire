@@ -1,38 +1,45 @@
 "use client";
+
 import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { Fragment } from "react";
+import { Loader2, Shield, Siren, Wallet } from "lucide-react";
 import RiskBadge from "@/components/RiskBadge";
-import { CheckCircle, XCircle, ChevronDown, ChevronUp, Loader2 } from "lucide-react";
+import type { AdminActionResponse, AdminOperationsResponse } from "@/types/platform";
 
-interface AdminClaim {
-  id: string;
-  incidentType: string;
-  incidentSeverity: string;
-  amount: number;
-  authoritiesContacted: string;
-  riskScore: number;
-  riskLevel: string;
-  flags: string[];
-  recommendation: string;
-  status: string;
-  adminNote: string | null;
-  infoRequestNote: string | null;
-  additionalDescription: string | null;
-  createdAt: string;
-  user: { name: string; email: string };
-}
+const policyStatusClass: Record<string, string> = {
+  ACTIVE: "bg-green-950 text-green-300 border-green-800",
+  PAUSED: "bg-yellow-950 text-yellow-300 border-yellow-800",
+  EXPIRED: "bg-red-950 text-red-300 border-red-800",
+};
+
+const claimStatusClass: Record<string, string> = {
+  PAID: "bg-green-950 text-green-300 border-green-800",
+  REVIEW_REQUIRED: "bg-yellow-950 text-yellow-300 border-yellow-800",
+  AUTO_INITIATED: "bg-blue-950 text-blue-300 border-blue-800",
+  BLOCKED: "bg-red-950 text-red-300 border-red-800",
+};
 
 export default function AdminPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
-  const [claims, setClaims] = useState<AdminClaim[]>([]);
+  const [data, setData] = useState<AdminOperationsResponse | null>(null);
   const [loading, setLoading] = useState(true);
-  const [expanded, setExpanded] = useState<string | null>(null);
-  const [updating, setUpdating] = useState<string | null>(null);
-  const [notes, setNotes] = useState<Record<string, string>>({});
-  const [filter, setFilter] = useState("ALL");
+  const [actionMessage, setActionMessage] = useState("");
+  const [actionError, setActionError] = useState("");
+  const [busyKey, setBusyKey] = useState<string | null>(null);
+
+  const loadData = async () => {
+    const response = await fetch("/api/admin/operations");
+    if (!response.ok) {
+      setLoading(false);
+      return;
+    }
+
+    const payload = await response.json();
+    setData(payload);
+    setLoading(false);
+  };
 
   useEffect(() => {
     if (status === "loading") return;
@@ -40,206 +47,269 @@ export default function AdminPage() {
       router.push("/");
       return;
     }
-    fetch("/api/analyze-claim/admin/claims")
-      .then((r) => r.json())
-      .then((d) => { setClaims(d); setLoading(false); });
+
+    loadData();
   }, [session, status, router]);
 
-  const handleAction = async (claimId: string, action: "APPROVE" | "REJECT" | "REQUEST_INFO") => {
-    setUpdating(claimId);
-    const response = await fetch("/api/analyze-claim/admin/claims", {
+  const runAction = async (key: string, body: object) => {
+    setBusyKey(key);
+    setActionError("");
+    setActionMessage("");
+
+    const response = await fetch("/api/admin/operations", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        claimId,
-        action,
-        adminNote: notes[claimId] || "",
-        infoRequestNote: notes[claimId] || "",
-      }),
+      body: JSON.stringify(body),
     });
 
-    const data = await response.json();
+    const payload = await response.json();
+
     if (!response.ok) {
-      setUpdating(null);
+      setActionError(payload.error || "Admin action failed.");
+      setBusyKey(null);
       return;
     }
 
-    setClaims((prev) =>
-      prev.map((c) => c.id === claimId
-        ? {
-            ...c,
-            status: data.status,
-            adminNote: data.adminNote,
-            infoRequestNote: data.infoRequestNote,
-          }
-        : c)
-    );
-    setUpdating(null);
+    const next = payload as AdminActionResponse;
+    setData(next);
+    setActionMessage(next.message);
+    setBusyKey(null);
   };
 
-  const filtered = filter === "ALL" ? claims : claims.filter((c) => c.status === filter);
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="animate-spin text-accent" size={32} />
+      </div>
+    );
+  }
 
-  if (loading) return (
-    <div className="flex items-center justify-center h-64">
-      <Loader2 className="animate-spin text-accent" size={32} />
-    </div>
-  );
+  if (!data) {
+    return <div className="text-text-dim">Unable to load operations data.</div>;
+  }
 
   return (
-    <div>
-      <div className="mb-8">
-        <p className="text-xs font-mono text-accent uppercase tracking-widest mb-2">Admin Panel</p>
-        <h1 className="text-3xl font-bold text-text">Claim Review</h1>
-        <p className="text-text-dim mt-1">{claims.length} total claims · Model retrains every 10 resolved</p>
+    <div className="space-y-8">
+      <div>
+        <p className="text-xs font-mono text-accent uppercase tracking-widest mb-2">Admin panel</p>
+        <h1 className="text-3xl font-bold text-text">Platform operations center</h1>
+        <p className="text-text-dim mt-1">
+          Monitor the live insurance engine, control trigger automation, manage policy status, and make payout decisions on flagged claims.
+        </p>
       </div>
 
-      <div className="grid grid-cols-4 gap-4 mb-8">
-        {[
-          { label: "Total", value: claims.length, color: "text-text" },
-          { label: "Pending", value: claims.filter((c) => c.status === "PENDING").length, color: "text-yellow-300" },
-          { label: "Info Requested", value: claims.filter((c) => c.status === "INFO_REQUESTED").length, color: "text-blue-300" },
-          { label: "Approved", value: claims.filter((c) => c.status === "APPROVED").length, color: "text-green-300" },
-        ].map((s) => (
-          <div key={s.label} className="bg-surface border border-border rounded-xl p-4">
-            <p className="text-xs font-mono text-text-dim uppercase mb-1">{s.label}</p>
-            <p className={`text-2xl font-bold ${s.color}`}>{s.value}</p>
+      {actionMessage && (
+        <div className="rounded-xl border border-accent/30 bg-accent/10 px-4 py-3 text-sm text-accent">
+          {actionMessage}
+        </div>
+      )}
+
+      {actionError && (
+        <div className="rounded-xl border border-red-800 bg-red-950 px-4 py-3 text-sm text-red-300">
+          {actionError}
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {data.metrics.map((metric) => (
+          <div key={metric.label} className="bg-surface border border-border rounded-xl p-4">
+            <p className="text-xs font-mono text-text-dim uppercase mb-1">{metric.label}</p>
+            <p className={`text-2xl font-bold ${metric.accent}`}>{metric.value}</p>
           </div>
         ))}
       </div>
 
-      <div className="flex gap-2 mb-5">
-        {["ALL", "PENDING", "INFO_REQUESTED", "APPROVED", "REJECTED"].map((f) => (
-          <button key={f} onClick={() => setFilter(f)}
-            className={`px-3 py-1 rounded-lg text-xs font-mono border transition-colors ${
-              filter === f ? "bg-accent/10 border-accent/40 text-accent" : "bg-surface border-border text-text-dim hover:text-text"
-            }`}>
-            {f}
-          </button>
-        ))}
+      <div className="grid grid-cols-1 xl:grid-cols-[1.15fr_1fr] gap-6">
+        <section className="bg-surface border border-border rounded-2xl p-6">
+          <div className="flex items-center gap-2 mb-4">
+            <Siren size={16} className="text-orange-300" />
+            <p className="text-sm font-semibold text-text">Trigger controls</p>
+          </div>
+          <div className="space-y-3">
+            {data.activeTriggers.map((trigger) => (
+              <div key={trigger.id} className="bg-background rounded-xl border border-border p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-text">{trigger.title}</p>
+                    <p className="text-xs text-text-dim mt-1">
+                      {trigger.city} · {trigger.zone} · {trigger.source}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <RiskBadge level={trigger.severity} />
+                    <span className={`px-2 py-1 rounded-lg border text-xs font-mono ${
+                      trigger.isActive
+                        ? "bg-green-950 text-green-300 border-green-800"
+                        : "bg-zinc-900 text-zinc-300 border-zinc-700"
+                    }`}>
+                      {trigger.isActive ? "LIVE" : "OFF"}
+                    </span>
+                  </div>
+                </div>
+                <p className="text-sm text-text-dim mt-3">{trigger.description}</p>
+                <div className="flex flex-wrap items-center justify-between gap-3 mt-4">
+                  <p className="text-xs text-text-dim">
+                    {trigger.impactHours} disruption hours · {Math.round(trigger.payoutMultiplier * 100)}% payout intensity
+                  </p>
+                  <button
+                    onClick={() => runAction(`trigger-${trigger.id}`, { entity: "trigger", id: trigger.id, isActive: !trigger.isActive })}
+                    disabled={busyKey === `trigger-${trigger.id}`}
+                    className="px-3 py-2 rounded-lg border border-border text-sm text-text hover:border-accent/40 disabled:opacity-50"
+                  >
+                    {busyKey === `trigger-${trigger.id}`
+                      ? "Updating..."
+                      : trigger.isActive
+                        ? "Deactivate trigger"
+                        : "Activate trigger"}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="bg-surface border border-border rounded-2xl p-6">
+          <div className="flex items-center gap-2 mb-4">
+            <Shield size={16} className="text-accent" />
+            <p className="text-sm font-semibold text-text">Policy controls</p>
+          </div>
+          <div className="space-y-3">
+            {data.policies.map((policy) => (
+              <div key={policy.id} className="bg-background rounded-xl border border-border p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-text">{policy.policyNumber}</p>
+                    <p className="text-xs text-text-dim mt-1">
+                      {policy.workerName} · {policy.workerEmail}
+                    </p>
+                    <p className="text-xs text-text-dim mt-1">
+                      {policy.city} · {policy.zone} · {policy.platform}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <RiskBadge level={policy.riskLevel} />
+                    <span className={`px-2 py-1 rounded-lg border text-xs font-mono ${policyStatusClass[policy.status] || policyStatusClass.PAUSED}`}>
+                      {policy.status}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 mt-4 text-sm">
+                  <div>
+                    <p className="text-xs font-mono uppercase text-text-dim mb-1">Weekly premium</p>
+                    <p className="text-text">₹{policy.weeklyPremium}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-mono uppercase text-text-dim mb-1">Coverage</p>
+                    <p className="text-text">₹{policy.weeklyCoverage}</p>
+                  </div>
+                </div>
+
+                <div className="mt-4 flex justify-end">
+                  <button
+                    onClick={() => runAction(`policy-${policy.id}`, {
+                      entity: "policy",
+                      id: policy.id,
+                      status: policy.status === "ACTIVE" ? "PAUSED" : "ACTIVE",
+                    })}
+                    disabled={busyKey === `policy-${policy.id}`}
+                    className="px-3 py-2 rounded-lg border border-border text-sm text-text hover:border-accent/40 disabled:opacity-50"
+                  >
+                    {busyKey === `policy-${policy.id}`
+                      ? "Updating..."
+                      : policy.status === "ACTIVE"
+                        ? "Pause policy"
+                        : "Resume policy"}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
       </div>
 
-      <div className="border border-border rounded-xl overflow-hidden">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-border bg-background">
-              {["Claimant", "Type", "Amount", "Risk", "Score", "Status", "Date", "Actions", ""].map((h) => (
-                <th key={h} className="px-4 py-3 text-left text-xs font-mono text-text-dim uppercase tracking-wider">{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-              {filtered.map((claim) => (
-              <Fragment key={claim.id}>
-                <tr className="border-b border-border hover:bg-white/5 transition-colors">
-                  <td className="px-4 py-3">
-                    <p className="text-text font-medium">{claim.user.name}</p>
-                    <p className="text-text-dim text-xs">{claim.user.email}</p>
-                  </td>
-                  <td className="px-4 py-3 text-text-dim">{claim.incidentType}</td>
-                  <td className="px-4 py-3 text-text">₹{claim.amount.toLocaleString()}</td>
-                  <td className="px-4 py-3"><RiskBadge level={claim.riskLevel as "LOW" | "MEDIUM" | "HIGH" | "CRITICAL"} /></td>
-                  <td className="px-4 py-3 font-mono text-accent">{Math.round(claim.riskScore)}</td>
-                  <td className="px-4 py-3">
-                    <span className={`text-xs font-mono px-2 py-1 rounded border ${
-                      claim.status === "APPROVED" ? "bg-green-950 text-green-400 border-green-800" :
-                      claim.status === "REJECTED" ? "bg-red-950 text-red-400 border-red-800" :
-                      claim.status === "INFO_REQUESTED" ? "bg-blue-950 text-blue-300 border-blue-800" :
-                      "bg-yellow-950 text-yellow-400 border-yellow-800"
-                    }`}>{claim.status}</span>
-                  </td>
-                  <td className="px-4 py-3 text-text-dim text-xs">
-                    {new Date(claim.createdAt).toLocaleDateString()}
-                  </td>
-                  <td className="px-4 py-3">
-                    {claim.status === "PENDING" && (
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => handleAction(claim.id, "APPROVE")}
-                          disabled={!!updating}
-                          className="flex items-center gap-1 px-2 py-1 rounded bg-green-950 hover:bg-green-900 text-green-400 text-xs border border-green-800 transition-colors disabled:opacity-50"
-                        >
-                          {updating === claim.id ? <Loader2 size={10} className="animate-spin" /> : <CheckCircle size={10} />}
-                          Approve
-                        </button>
-                        <button
-                          onClick={() => handleAction(claim.id, "REJECT")}
-                          disabled={!!updating}
-                          className="flex items-center gap-1 px-2 py-1 rounded bg-red-950 hover:bg-red-900 text-red-400 text-xs border border-red-800 transition-colors disabled:opacity-50"
-                        >
-                          <XCircle size={10} /> Reject
-                        </button>
-                        <button
-                          onClick={() => handleAction(claim.id, "REQUEST_INFO")}
-                          disabled={!!updating || !(notes[claim.id] || "").trim()}
-                          className="flex items-center gap-1 px-2 py-1 rounded bg-blue-950 hover:bg-blue-900 text-blue-300 text-xs border border-blue-800 transition-colors disabled:opacity-50"
-                        >
-                          Request Info
-                        </button>
-                      </div>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    <button onClick={() => setExpanded(expanded === claim.id ? null : claim.id)} className="text-text-dim hover:text-text">
-                      {expanded === claim.id ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                    </button>
-                  </td>
-                </tr>
-                {expanded === claim.id && (
-                  <tr key={`${claim.id}-exp`} className="bg-background border-b border-border">
-                    <td colSpan={9} className="px-6 py-4">
-                      <div className="grid grid-cols-3 gap-4 text-xs mb-4">
-                        <div>
-                          <p className="text-text-dim font-mono uppercase mb-1">Incident</p>
-                          <p className="text-text">{claim.incidentType} · {claim.incidentSeverity}</p>
-                        </div>
-                        <div>
-                          <p className="text-text-dim font-mono uppercase mb-1">Flags</p>
-                          {claim.flags.length === 0
-                            ? <p className="text-green-400">None</p>
-                            : claim.flags.map((f) => <p key={f} className="text-red-400">• {f}</p>)}
-                        </div>
-                        <div>
-                          <p className="text-text-dim font-mono uppercase mb-1">Recommendation</p>
-                          <p className="text-text">{claim.recommendation}</p>
-                        </div>
-                      </div>
-                      {(claim.status === "PENDING" || claim.status === "INFO_REQUESTED") && (
-                        <div className="flex gap-3 items-end">
-                          <div className="flex-1">
-                            <p className="text-text-dim font-mono text-xs uppercase mb-1">Admin Note / Info Request</p>
-                            <input
-                              className="w-full bg-surface border border-border rounded-lg px-3 py-2 text-text text-xs focus:outline-none focus:border-accent/60"
-                              placeholder="Reason or extra details requested from claimant..."
-                              value={notes[claim.id] || ""}
-                              onChange={(e) => setNotes((n) => ({ ...n, [claim.id]: e.target.value }))}
-                            />
-                          </div>
-                        </div>
-                      )}
-                      <div className="grid grid-cols-2 gap-4 mt-3 text-xs">
-                        <div>
-                          <p className="text-text-dim font-mono uppercase mb-1">Authorities Contacted</p>
-                          <p className="text-text">{claim.authoritiesContacted}</p>
-                        </div>
-                        <div>
-                          <p className="text-text-dim font-mono uppercase mb-1">User Additional Description</p>
-                          <p className="text-text">{claim.additionalDescription || "Not provided"}</p>
-                        </div>
-                      </div>
-                      {claim.infoRequestNote && (
-                        <p className="text-xs text-blue-300 mt-2">Requested info: {claim.infoRequestNote}</p>
-                      )}
-                      {claim.adminNote && (
-                        <p className="text-xs text-text-dim mt-2">Admin note: <span className="text-text">{claim.adminNote}</span></p>
-                      )}
-                    </td>
-                  </tr>
-                )}
-              </Fragment>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <section className="bg-surface border border-border rounded-2xl p-6">
+        <div className="flex items-center gap-2 mb-4">
+          <Wallet size={16} className="text-green-300" />
+          <p className="text-sm font-semibold text-text">Claim review and payout decisions</p>
+        </div>
+        <div className="space-y-4">
+          {data.claims.map((claim) => (
+            <div key={claim.id} className="bg-background rounded-xl border border-border p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-text">{claim.trigger.title}</p>
+                  <p className="text-xs text-text-dim mt-1">
+                    {claim.workerName} · {claim.workerEmail} · {claim.policyNumber}
+                  </p>
+                  <p className="text-xs text-text-dim mt-1">
+                    {claim.trigger.city} · {claim.trigger.zone} · {new Date(claim.createdAt).toLocaleString()}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <RiskBadge level={claim.fraudLevel} />
+                  <span className={`px-2 py-1 rounded-lg border text-xs font-mono ${claimStatusClass[claim.status] || claimStatusClass.REVIEW_REQUIRED}`}>
+                    {claim.status}
+                  </span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mt-4 text-sm">
+                <div>
+                  <p className="text-xs font-mono uppercase text-text-dim mb-1">Income loss</p>
+                  <p className="text-text">₹{claim.estimatedIncomeLoss}</p>
+                </div>
+                <div>
+                  <p className="text-xs font-mono uppercase text-text-dim mb-1">Payout</p>
+                  <p className="text-text">₹{claim.approvedPayout}</p>
+                </div>
+                <div>
+                  <p className="text-xs font-mono uppercase text-text-dim mb-1">Fraud score</p>
+                  <p className="text-text">{claim.fraudScore}</p>
+                </div>
+                <div>
+                  <p className="text-xs font-mono uppercase text-text-dim mb-1">Reference</p>
+                  <p className="text-text">{claim.payoutReference || "Pending"}</p>
+                </div>
+              </div>
+
+              <p className="text-sm text-text-dim mt-4">{claim.validationSummary}</p>
+
+              <div className="flex flex-wrap gap-2 mt-4">
+                {claim.fraudFlags.map((flag) => (
+                  <span key={flag} className="text-xs text-text-dim border border-border rounded-full px-3 py-1">
+                    {flag}
+                  </span>
+                ))}
+              </div>
+
+              <div className="flex flex-wrap gap-2 mt-4 justify-end">
+                <button
+                  onClick={() => runAction(`claim-approve-${claim.id}`, { entity: "claim", id: claim.id, action: "APPROVE" })}
+                  disabled={busyKey === `claim-approve-${claim.id}`}
+                  className="px-3 py-2 rounded-lg bg-green-950 text-green-300 border border-green-800 text-sm disabled:opacity-50"
+                >
+                  {busyKey === `claim-approve-${claim.id}` ? "Approving..." : "Approve payout"}
+                </button>
+                <button
+                  onClick={() => runAction(`claim-block-${claim.id}`, { entity: "claim", id: claim.id, action: "BLOCK" })}
+                  disabled={busyKey === `claim-block-${claim.id}`}
+                  className="px-3 py-2 rounded-lg bg-red-950 text-red-300 border border-red-800 text-sm disabled:opacity-50"
+                >
+                  {busyKey === `claim-block-${claim.id}` ? "Blocking..." : "Block claim"}
+                </button>
+                <button
+                  onClick={() => runAction(`claim-reopen-${claim.id}`, { entity: "claim", id: claim.id, action: "REOPEN" })}
+                  disabled={busyKey === `claim-reopen-${claim.id}`}
+                  className="px-3 py-2 rounded-lg border border-border text-sm text-text disabled:opacity-50"
+                >
+                  {busyKey === `claim-reopen-${claim.id}` ? "Updating..." : "Send to review"}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }

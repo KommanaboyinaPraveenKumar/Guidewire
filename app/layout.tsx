@@ -8,8 +8,8 @@ const dmSans = DM_Sans({ subsets: ["latin"], variable: "--font-sans" });
 const jetbrains = JetBrains_Mono({ subsets: ["latin"], variable: "--font-mono" });
 
 export const metadata: Metadata = {
-  title: "SentinelAI — Fraud Detection",
-  description: "AI-powered insurance claim fraud detection platform",
+  title: "SentinelAI — Weekly Income Protection",
+  description: "AI-enabled parametric insurance platform for gig worker income protection",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

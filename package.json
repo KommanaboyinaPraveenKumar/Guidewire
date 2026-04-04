@@ -1,7 +1,7 @@
 {
   "name": "claim-secure",
   "version": "1.0.0",
-  "description": "AI-powered insurance claim fraud detection system",
+  "description": "AI-powered weekly income protection platform for India's gig economy",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -30,9 +30,11 @@
     "@types/react": "^18",
     "@types/react-dom": "^18",
     "autoprefixer": "^10.4.19",
-    "eslint": "^10.0.3",
+    "eslint": "^8.57.0",
+    "eslint-config-next": "14.2.5",
     "postcss": "^8.4.38",
     "tailwindcss": "^3.4.4",
+    "ts-node": "^10.9.2",
     "typescript": "^5"
   }
 }
