@@ -90,12 +90,21 @@ export default function AdminPage() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <p className="text-xs font-mono text-accent uppercase tracking-widest mb-2">Admin panel</p>
-        <h1 className="text-3xl font-bold text-text">Platform operations center</h1>
-        <p className="text-text-dim mt-1">
-          Monitor the live insurance engine, control trigger automation, manage policy status, and make payout decisions on flagged claims.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p className="text-xs font-mono text-accent uppercase tracking-widest mb-2">Admin panel</p>
+          <h1 className="text-3xl font-bold text-text">Platform operations center</h1>
+          <p className="text-text-dim mt-1">
+            Monitor the live insurance engine, control trigger automation, manage policy status, and make payout decisions on flagged claims.
+          </p>
+        </div>
+        <button
+          onClick={() => runAction("trigger-sync", { entity: "trigger_sync" })}
+          disabled={busyKey === "trigger-sync"}
+          className="px-4 py-2 rounded-lg border border-border text-sm text-text hover:border-accent/40 disabled:opacity-50"
+        >
+          {busyKey === "trigger-sync" ? "Syncing feeds..." : "Sync live feeds"}
+        </button>
       </div>
 
       {actionMessage && (
@@ -234,10 +243,11 @@ export default function AdminPage() {
           <p className="text-sm font-semibold text-text">Claim review and payout decisions</p>
         </div>
         <div className="space-y-4">
-          {data.claims.map((claim) => (
-            <div key={claim.id} className="bg-background rounded-xl border border-border p-4">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
+          {data.claims.length > 0 ? (
+            data.claims.map((claim) => (
+              <div key={claim.id} className="bg-background rounded-xl border border-border p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
                   <p className="text-sm font-semibold text-text">{claim.trigger.title}</p>
                   <p className="text-xs text-text-dim mt-1">
                     {claim.workerName} · {claim.workerEmail} · {claim.policyNumber}
@@ -283,31 +293,35 @@ export default function AdminPage() {
                 ))}
               </div>
 
-              <div className="flex flex-wrap gap-2 mt-4 justify-end">
-                <button
-                  onClick={() => runAction(`claim-approve-${claim.id}`, { entity: "claim", id: claim.id, action: "APPROVE" })}
-                  disabled={busyKey === `claim-approve-${claim.id}`}
-                  className="px-3 py-2 rounded-lg bg-green-950 text-green-300 border border-green-800 text-sm disabled:opacity-50"
-                >
-                  {busyKey === `claim-approve-${claim.id}` ? "Approving..." : "Approve payout"}
-                </button>
-                <button
-                  onClick={() => runAction(`claim-block-${claim.id}`, { entity: "claim", id: claim.id, action: "BLOCK" })}
-                  disabled={busyKey === `claim-block-${claim.id}`}
-                  className="px-3 py-2 rounded-lg bg-red-950 text-red-300 border border-red-800 text-sm disabled:opacity-50"
-                >
-                  {busyKey === `claim-block-${claim.id}` ? "Blocking..." : "Block claim"}
-                </button>
-                <button
-                  onClick={() => runAction(`claim-reopen-${claim.id}`, { entity: "claim", id: claim.id, action: "REOPEN" })}
-                  disabled={busyKey === `claim-reopen-${claim.id}`}
-                  className="px-3 py-2 rounded-lg border border-border text-sm text-text disabled:opacity-50"
-                >
-                  {busyKey === `claim-reopen-${claim.id}` ? "Updating..." : "Send to review"}
-                </button>
-              </div>
+              {claim.status === "REVIEW_REQUIRED" && (
+                <div className="flex flex-wrap gap-2 mt-4 justify-end">
+                  <button
+                    onClick={() => runAction(`claim-approve-${claim.id}`, { entity: "claim", id: claim.id, action: "APPROVE" })}
+                    disabled={busyKey === `claim-approve-${claim.id}`}
+                    className="px-3 py-2 rounded-lg bg-green-950 text-green-300 border border-green-800 text-sm disabled:opacity-50"
+                  >
+                    {busyKey === `claim-approve-${claim.id}` ? "Approving..." : "Approve payout"}
+                  </button>
+                  <button
+                    onClick={() => runAction(`claim-block-${claim.id}`, { entity: "claim", id: claim.id, action: "BLOCK" })}
+                    disabled={busyKey === `claim-block-${claim.id}`}
+                    className="px-3 py-2 rounded-lg bg-red-950 text-red-300 border border-red-800 text-sm disabled:opacity-50"
+                  >
+                    {busyKey === `claim-block-${claim.id}` ? "Blocking..." : "Block claim"}
+                  </button>
+                  <button
+                    onClick={() => runAction(`claim-reopen-${claim.id}`, { entity: "claim", id: claim.id, action: "REOPEN" })}
+                    disabled={busyKey === `claim-reopen-${claim.id}`}
+                    className="px-3 py-2 rounded-lg border border-border text-sm text-text disabled:opacity-50"
+                  >
+                    {busyKey === `claim-reopen-${claim.id}` ? "Updating..." : "Send to review"}
+                  </button>
+                </div>
+              )}
             </div>
-          ))}
+          ))) : (
+            <div className="text-sm text-text-dim text-center py-6">No claims returned in the feed.</div>
+          )}
         </div>
       </section>
     </div>

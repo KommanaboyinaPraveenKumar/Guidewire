@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import {
+  forceRefreshTriggerCatalog,
   getAdminOperations,
   reviewClaimAction,
   updatePolicyStatus,
@@ -45,6 +46,11 @@ export async function PATCH(req: Request) {
       }
 
       const result = await reviewClaimAction(String(body.id), action);
+      return NextResponse.json(result);
+    }
+
+    if (body.entity === "trigger_sync") {
+      const result = await forceRefreshTriggerCatalog();
       return NextResponse.json(result);
     }
 

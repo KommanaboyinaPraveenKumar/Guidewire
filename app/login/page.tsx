@@ -1,6 +1,6 @@
 "use client";
-import { useState } from "react";
-import { signIn } from "next-auth/react";
+import { useEffect, useState } from "react";
+import { signIn, useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { Shield, Loader2 } from "lucide-react";
 import Link from "next/link";
@@ -10,7 +10,19 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const { data: session, status } = useSession();
   const router = useRouter();
+
+  useEffect(() => {
+    if (status !== "authenticated" || !session?.user) return;
+
+    if (session.user.role === "ADMIN") {
+      router.replace("/admin");
+      return;
+    }
+
+    router.replace("/");
+  }, [status, session, router]);
 
   const handleLogin = async () => {
     setLoading(true);
@@ -24,15 +36,26 @@ export default function LoginPage() {
     router.refresh();
   };
 
+  if (status === "loading" || status === "authenticated") {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="flex items-center gap-2 text-text-dim text-sm">
+          <Loader2 size={16} className="animate-spin" />
+          Redirecting to your workspace...
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-background">
       <div className="w-full max-w-md bg-surface border border-border rounded-2xl p-8">
-        <div className="flex items-center gap-2 mb-8">
+        <Link href="/" className="flex items-center gap-2 mb-8 w-fit" aria-label="Go to home page">
           <Shield className="text-accent" size={24} />
           <span className="font-bold text-xl font-mono">
             SENTINEL<span className="text-accent">AI</span>
           </span>
-        </div>
+        </Link>
         <h1 className="text-2xl font-bold text-text mb-1">Sign in</h1>
         <p className="text-text-dim text-sm mb-6">Access your worker protection dashboard and weekly policy controls</p>
 

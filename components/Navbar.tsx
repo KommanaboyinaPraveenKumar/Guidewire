@@ -20,15 +20,15 @@ export default function Navbar() {
   return (
     <nav className="border-b border-border bg-surface/80 backdrop-blur sticky top-0 z-50">
       <div className="max-w-7xl mx-auto px-6 h-14 flex items-center justify-between">
-        <div className="flex items-center gap-2">
+        <Link href="/" className="flex items-center gap-2" aria-label="Go to home page">
           <Shield className="text-accent" size={20} />
           <span className="font-bold text-text font-mono tracking-tight">
             SENTINEL<span className="text-accent">AI</span>
           </span>
-        </div>
+        </Link>
         <div className="flex items-center gap-1">
           {session && links.map((l) => (
-            <Link key={l.href} href={l.href}
+            <Link key={l.href} href={l.href} prefetch={false}
               className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
                 path === l.href
                   ? "bg-accent/10 text-accent border border-accent/30"

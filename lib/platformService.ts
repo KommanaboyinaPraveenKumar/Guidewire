@@ -6,6 +6,13 @@ import {
   evaluateFraudSignal,
   getMockTriggerCatalog,
 } from "@/lib/protectionEngine";
+import {
+  fetchLiveTriggersFromOpenMeteo,
+  type ExternalTriggerCandidate,
+  type TriggerLocation,
+} from "@/lib/externalTriggers";
+import { scoreIncomeClaimWithMl } from "@/lib/mlScoring";
+import { issueClaimPayout } from "@/lib/payoutGateway";
 import type {
   AdminActionResponse,
   AdminOperationsResponse,
@@ -112,12 +119,116 @@ function buildPolicyNumber(userId: string) {
   return `POL-${userId.slice(-6).toUpperCase()}-${Date.now().toString(36).toUpperCase()}`;
 }
 
-export async function ensureMockTriggers() {
-  const catalog = getMockTriggerCatalog();
+type TriggerCatalogEntry = ReturnType<typeof getMockTriggerCatalog>[number] | ExternalTriggerCandidate;
+
+export type TriggerWebhookEventInput = {
+  externalId?: string;
+  type: string;
+  severity: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+  city: string;
+  zone: string;
+  title: string;
+  description: string;
+  impactHours: number;
+  payoutMultiplier: number;
+  isActive?: boolean;
+  startsAt?: string;
+  endsAt?: string;
+  source?: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type TriggerWebhookPayload = {
+  provider: string;
+  events: TriggerWebhookEventInput[];
+};
+
+const USE_REAL_TRIGGERS = process.env.USE_REAL_TRIGGERS === "true";
+const ALLOW_MOCK_FALLBACK = process.env.REAL_TRIGGERS_FALLBACK_TO_MOCK !== "false";
+const TRIGGER_REFRESH_WINDOW_MS = Number(process.env.TRIGGER_REFRESH_WINDOW_MS ?? 10 * 60 * 1000);
+
+let lastCatalogRefreshAt = 0;
+let catalogRefreshInFlight: Promise<void> | null = null;
+let lastCatalogSource: "live" | "mock" | "webhook" | "none" = "none";
+let lastCatalogCount = 0;
+
+function clampScore(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+async function refreshTrustScoreForUser(userId: string) {
+  const profile = await prisma.workerProfile.findUnique({
+    where: { userId },
+    select: { trustScore: true },
+  });
+
+  if (!profile) return;
+
+  const claims = await prisma.incomeClaim.findMany({
+    where: { userId },
+    select: { status: true, fraudScore: true, createdAt: true },
+  });
+
+  if (claims.length === 0) {
+    const baseline = 0.72;
+    if (Math.abs((profile.trustScore ?? baseline) - baseline) > 0.005) {
+      await prisma.workerProfile.update({ where: { userId }, data: { trustScore: baseline } });
+    }
+    return;
+  }
+
+  const now = Date.now();
+  const recentWindowMs = 30 * 24 * 60 * 60 * 1000;
+  const totalClaims = claims.length;
+  const paidCount = claims.filter((claim) => claim.status === "PAID").length;
+  const reviewCount = claims.filter((claim) => claim.status === "REVIEW_REQUIRED").length;
+  const blockedCount = claims.filter((claim) => claim.status === "BLOCKED").length;
+  const highFraudCount = claims.filter((claim) => claim.fraudScore >= 70).length;
+  const recentClaimCount = claims.filter((claim) => now - claim.createdAt.getTime() <= recentWindowMs).length;
+
+  const paidRatio = paidCount / totalClaims;
+  const reviewRatio = reviewCount / totalClaims;
+  const blockedRatio = blockedCount / totalClaims;
+  const highFraudRatio = highFraudCount / totalClaims;
+  const avgFraudScore = claims.reduce((sum, claim) => sum + claim.fraudScore, 0) / totalClaims;
+  const avgFraudRatio = avgFraudScore / 100;
+  const activityPenalty = Math.min(recentClaimCount / 12, 1) * 0.06;
+
+  const computedTrustScore = clampScore(
+    0.72 +
+      paidRatio * 0.12 -
+      reviewRatio * 0.08 -
+      blockedRatio * 0.18 -
+      highFraudRatio * 0.12 -
+      avgFraudRatio * 0.2 -
+      activityPenalty,
+    0.45,
+    0.95,
+  );
+
+  if (Math.abs(computedTrustScore - profile.trustScore) <= 0.005) {
+    return;
+  }
+
+  await prisma.workerProfile.update({
+    where: { userId },
+    data: {
+      trustScore: Math.round(computedTrustScore * 1000) / 1000,
+    },
+  });
+}
+
+async function upsertTriggerCatalog(catalog: TriggerCatalogEntry[], mode: "mock" | "live" | "webhook") {
+  const refreshedAt = new Date().toISOString();
 
   await Promise.all(
-    catalog.map((trigger) =>
-      prisma.triggerEvent.upsert({
+    catalog.map((trigger) => {
+      const metadata =
+        "metadata" in trigger && trigger.metadata
+          ? trigger.metadata
+          : {};
+
+      return prisma.triggerEvent.upsert({
         where: { externalId: trigger.externalId },
         update: {
           type: trigger.type,
@@ -132,7 +243,11 @@ export async function ensureMockTriggers() {
           isActive: trigger.isActive,
           startsAt: trigger.startsAt,
           endsAt: trigger.endsAt,
-          metadata: JSON.stringify({ mode: "mock", refreshedAt: new Date().toISOString() }),
+          metadata: JSON.stringify({
+            mode,
+            refreshedAt,
+            measurements: metadata,
+          }),
         },
         create: {
           externalId: trigger.externalId,
@@ -148,11 +263,182 @@ export async function ensureMockTriggers() {
           isActive: trigger.isActive,
           startsAt: trigger.startsAt,
           endsAt: trigger.endsAt,
-          metadata: JSON.stringify({ mode: "mock", refreshedAt: new Date().toISOString() }),
+          metadata: JSON.stringify({
+            mode,
+            refreshedAt,
+            measurements: metadata,
+          }),
         },
-      }),
-    ),
+      });
+    }),
   );
+}
+
+function normalizeWebhookEvent(event: TriggerWebhookEventInput, provider: string, now: Date): ExternalTriggerCandidate | null {
+  if (!event.type || !event.city || !event.zone || !event.title || !event.description) {
+    return null;
+  }
+
+  const severity = ["LOW", "MEDIUM", "HIGH", "CRITICAL"].includes(event.severity)
+    ? event.severity
+    : "MEDIUM";
+
+  const startsAt = event.startsAt ? new Date(event.startsAt) : new Date(now.getTime() - 10 * 60 * 1000);
+  const endsAt = event.endsAt ? new Date(event.endsAt) : new Date(now.getTime() + 6 * 60 * 60 * 1000);
+
+  if (Number.isNaN(startsAt.getTime()) || Number.isNaN(endsAt.getTime())) {
+    return null;
+  }
+
+  const externalId =
+    event.externalId && event.externalId.trim().length > 0
+      ? event.externalId
+      : `WH-${provider.toUpperCase()}-${event.type.toUpperCase()}-${event.city.slice(0, 3).toUpperCase()}-${event.zone.slice(0, 3).toUpperCase()}-${Date.now().toString(36).toUpperCase()}`;
+
+  return {
+    externalId,
+    type: event.type,
+    severity,
+    city: event.city,
+    zone: event.zone,
+    source: event.source ?? `Webhook ${provider}`,
+    title: event.title,
+    description: event.description,
+    impactHours: Math.max(1, Number(event.impactHours || 0)),
+    payoutMultiplier: Math.max(0.05, Number(event.payoutMultiplier || 0)),
+    isActive: event.isActive ?? true,
+    startsAt,
+    endsAt,
+    metadata: event.metadata ?? {},
+  };
+}
+
+export async function ingestTriggerWebhookPayload(payload: TriggerWebhookPayload) {
+  const provider = String(payload.provider || "external").trim() || "external";
+  const now = new Date();
+
+  const normalized = (payload.events ?? [])
+    .map((event) => normalizeWebhookEvent(event, provider, now))
+    .filter((event): event is ExternalTriggerCandidate => Boolean(event));
+
+  if (normalized.length === 0) {
+    return { accepted: 0, rejected: (payload.events ?? []).length };
+  }
+
+  await upsertTriggerCatalog(normalized, "webhook");
+  lastCatalogSource = "webhook";
+  lastCatalogCount = normalized.length;
+  lastCatalogRefreshAt = Date.now();
+
+  return {
+    accepted: normalized.length,
+    rejected: (payload.events ?? []).length - normalized.length,
+  };
+}
+
+export async function ensureMockTriggers() {
+  const catalog = getMockTriggerCatalog();
+  await upsertTriggerCatalog(catalog, "mock");
+  lastCatalogSource = "mock";
+  lastCatalogCount = catalog.length;
+}
+
+async function syncLiveTriggers() {
+  const now = new Date();
+  const workerLocations = await prisma.workerProfile.findMany({
+    select: { city: true, zone: true },
+  });
+  const catalog = await fetchLiveTriggersFromOpenMeteo(now, workerLocations as TriggerLocation[]);
+  const activeExternalIds = catalog.map((trigger) => trigger.externalId);
+
+  await upsertTriggerCatalog(catalog, "live");
+
+  if (activeExternalIds.length > 0) {
+    await prisma.triggerEvent.updateMany({
+      where: {
+        externalId: { startsWith: "REAL-" },
+        isActive: true,
+        NOT: { externalId: { in: activeExternalIds } },
+      },
+      data: {
+        isActive: false,
+        endsAt: now,
+        metadata: JSON.stringify({ mode: "live", refreshedAt: now.toISOString(), status: "inactive" }),
+      },
+    });
+  } else {
+    await prisma.triggerEvent.updateMany({
+      where: {
+        externalId: { startsWith: "REAL-" },
+        isActive: true,
+      },
+      data: {
+        isActive: false,
+        endsAt: now,
+        metadata: JSON.stringify({ mode: "live", refreshedAt: now.toISOString(), status: "inactive" }),
+      },
+    });
+  }
+
+  lastCatalogSource = "live";
+  lastCatalogCount = catalog.length;
+  return catalog.length;
+}
+
+export async function ensureTriggerCatalog(forceRefresh = false) {
+  const now = Date.now();
+  if (!forceRefresh && now - lastCatalogRefreshAt < TRIGGER_REFRESH_WINDOW_MS) {
+    return;
+  }
+
+  if (catalogRefreshInFlight) {
+    await catalogRefreshInFlight;
+    return;
+  }
+
+  catalogRefreshInFlight = (async () => {
+    if (!USE_REAL_TRIGGERS) {
+      await ensureMockTriggers();
+      lastCatalogRefreshAt = Date.now();
+      return;
+    }
+
+    try {
+      const liveCount = await syncLiveTriggers();
+      if (liveCount === 0 && ALLOW_MOCK_FALLBACK) {
+        await ensureMockTriggers();
+      }
+    } catch {
+      if (ALLOW_MOCK_FALLBACK) {
+        await ensureMockTriggers();
+      } else {
+        throw new Error("Real trigger sync failed and mock fallback is disabled.");
+      }
+    }
+
+    lastCatalogRefreshAt = Date.now();
+  })().finally(() => {
+    catalogRefreshInFlight = null;
+  });
+
+  await catalogRefreshInFlight;
+}
+
+export async function forceRefreshTriggerCatalog(): Promise<AdminActionResponse> {
+  await ensureTriggerCatalog(true);
+  const payload = await getAdminOperations();
+
+  const message =
+    lastCatalogSource === "live"
+      ? `Live feeds synced. ${lastCatalogCount} active live triggers loaded.`
+      : lastCatalogSource === "mock"
+        ? `Live feeds unavailable. Loaded ${lastCatalogCount} mock triggers for continuity.`
+        : "Trigger sync completed.";
+
+  return {
+    ...payload,
+    message,
+  };
 }
 
 export async function createProfileAndPolicy(userId: string, input: WorkerProfileInput) {
@@ -249,7 +535,7 @@ export async function syncPolicyForUser(userId: string) {
 }
 
 export async function getPolicyContextForUser(userId: string): Promise<PolicyContextResponse> {
-  await ensureMockTriggers();
+  await ensureTriggerCatalog();
 
   const { profile, policy } = await syncPolicyForUser(userId);
   if (!profile || !policy) {
@@ -284,12 +570,17 @@ export async function getPolicyContextForUser(userId: string): Promise<PolicyCon
 }
 
 export async function runAutomationForUser(userId: string) {
-  await ensureMockTriggers();
+  await ensureTriggerCatalog();
 
   const { profile, policy } = await syncPolicyForUser(userId);
   if (!profile || !policy) {
     return { created: 0, claims: [] as ClaimView[] };
   }
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { name: true },
+  });
 
   if (policy.status !== "ACTIVE") {
     const claims = await prisma.incomeClaim.findMany({
@@ -323,6 +614,9 @@ export async function runAutomationForUser(userId: string) {
   let created = 0;
 
   for (const trigger of activeTriggers) {
+    // DUPLICATE CLAIM PREVENTION
+    // Strict database-level and logic-level validation prevents a user
+    // from claiming multiple times for the exact same disruption event.
     const existing = await prisma.incomeClaim.findUnique({
       where: {
         policyId_triggerEventId: {
@@ -343,7 +637,7 @@ export async function runAutomationForUser(userId: string) {
       weeklyCoverage: policy.weeklyCoverage,
     });
 
-    const fraud = evaluateFraudSignal({
+    const fallbackFraud = evaluateFraudSignal({
       zoneMatch: trigger.zone === profile.zone,
       weeklyCoverage: policy.weeklyCoverage,
       estimatedIncomeLoss: payout.estimatedIncomeLoss,
@@ -351,11 +645,59 @@ export async function runAutomationForUser(userId: string) {
       trustScore: profile.trustScore,
     });
 
-    const status = fraud.fraudScore >= 70 ? "REVIEW_REQUIRED" : "PAID";
-    const payoutReference =
-      status === "PAID"
-        ? `UPI-${trigger.type.slice(0, 3)}-${Date.now().toString(36).toUpperCase()}`
-        : null;
+    const mlFraud = await scoreIncomeClaimWithMl({
+      zoneMatch: trigger.zone === profile.zone,
+      payoutRatio: payout.approvedPayout / Math.max(policy.weeklyCoverage, 1),
+      recentClaimCount,
+      trustScore: profile.trustScore,
+      triggerSeverity: trigger.severity,
+      impactHours: trigger.impactHours,
+      weeklyIncome: profile.weeklyIncome,
+      approvedPayout: payout.approvedPayout,
+      // LOCATION AND ACTIVITY VALIDATION (Simulated for this demo API representation, normally from external webhooks)
+      gpsVerified: Math.random() > 0.15,     // Simulate 85% passed GPS check 
+      onShiftAtTime: Math.random() > 0.20,   // Simulate 80% activity validation checked from Platform API
+    });
+
+    const fraud = mlFraud
+      ? {
+          fraudScore: mlFraud.riskScore,
+          fraudLevel: mlFraud.riskLevel,
+          flags: mlFraud.flags.length > 0 ? mlFraud.flags : fallbackFraud.flags,
+          validationSummary: `${mlFraud.validationSummary} (Scoring source: ML service)`,
+        }
+      : {
+          ...fallbackFraud,
+          validationSummary: `${fallbackFraud.validationSummary} (Scoring source: rule engine fallback)`,
+        };
+
+    let status = fraud.fraudScore >= 70 ? "REVIEW_REQUIRED" : "PAID";
+    let payoutReference: string | null = null;
+    const fraudFlags = [...fraud.flags];
+    let validationSummary = fraud.validationSummary;
+
+    if (status === "PAID") {
+      const payoutResult = await issueClaimPayout({
+        claimId: `AUTO-${policy.id.slice(-6)}-${trigger.id.slice(-6)}-${Date.now().toString(36).toUpperCase()}`,
+        amountInr: payout.approvedPayout,
+        upiId: profile.upiId,
+        workerName: user?.name ?? "Worker",
+        workerPhone: profile.phone,
+      });
+
+      if (payoutResult.success && payoutResult.reference) {
+        payoutReference = payoutResult.reference;
+        if (payoutResult.provider === "mock-fallback" && payoutResult.error) {
+          fraudFlags.push(`Payout provider failed, switched to fallback: ${payoutResult.error}`);
+          validationSummary = `${validationSummary} Payout fallback used due to gateway issue.`;
+        }
+      } else {
+        status = "REVIEW_REQUIRED";
+        payoutReference = null;
+        fraudFlags.push(`Payout dispatch failed: ${payoutResult.error ?? "Unknown provider error"}`);
+        validationSummary = `${validationSummary} Auto payout failed and the claim was routed for manual review.`;
+      }
+    }
 
     await prisma.incomeClaim.create({
       data: {
@@ -367,19 +709,24 @@ export async function runAutomationForUser(userId: string) {
         approvedPayout: payout.approvedPayout,
         fraudScore: fraud.fraudScore,
         fraudLevel: fraud.fraudLevel,
-        fraudFlags: JSON.stringify(fraud.flags),
-        validationSummary: fraud.validationSummary,
+        fraudFlags: JSON.stringify(fraudFlags),
+        validationSummary,
         payoutReference,
         triggerSnapshot: JSON.stringify({
           title: trigger.title,
           source: trigger.source,
           impactHours: trigger.impactHours,
           payoutMultiplier: trigger.payoutMultiplier,
+          scoringSource: mlFraud ? "ML_SERVICE" : "RULE_ENGINE",
         }),
       },
     });
 
     created += 1;
+  }
+
+  if (created > 0) {
+    await refreshTrustScoreForUser(userId);
   }
 
   const claims = await prisma.incomeClaim.findMany({
@@ -392,7 +739,7 @@ export async function runAutomationForUser(userId: string) {
 }
 
 export async function simulateDisruptionForUser(userId: string) {
-  await ensureMockTriggers();
+  await ensureTriggerCatalog();
 
   const { profile, policy } = await syncPolicyForUser(userId);
   if (!profile || !policy) {
@@ -496,7 +843,7 @@ export async function getDashboardForUser(userId: string): Promise<DashboardResp
 }
 
 export async function getAdminOperations(): Promise<AdminOperationsResponse> {
-  await ensureMockTriggers();
+  await ensureTriggerCatalog();
 
   const [policies, claims, activeTriggers] = await Promise.all([
     prisma.policy.findMany({
@@ -571,45 +918,75 @@ export async function reviewClaimAction(
 ): Promise<AdminActionResponse> {
   const claim = await prisma.incomeClaim.findUnique({
     where: { id: claimId },
-    include: { triggerEvent: true },
+    include: {
+      triggerEvent: true,
+      user: { select: { name: true } },
+      policy: { include: { profile: true } },
+    },
   });
 
   if (!claim) {
     throw new Error("Claim not found.");
   }
 
-  const nextStatus =
+  let nextStatus =
     action === "APPROVE" ? "PAID" :
     action === "BLOCK" ? "BLOCKED" :
     "REVIEW_REQUIRED";
 
-  const payoutReference =
+  let payoutReference =
+    action === "BLOCK"
+      ? null
+      : claim.payoutReference;
+
+  let validationSummary =
     action === "APPROVE"
-      ? claim.payoutReference ?? `UPI-ADM-${Date.now().toString(36).toUpperCase()}`
+      ? "Admin approved the claim after manual review and released payout."
       : action === "BLOCK"
-        ? null
-        : claim.payoutReference;
+        ? "Admin blocked the claim after manual review because the payout did not meet validation checks."
+        : "Claim moved back to the review queue for another decision.";
+
+  if (action === "APPROVE" && !claim.payoutReference) {
+    const payoutResult = await issueClaimPayout({
+      claimId: claim.id,
+      amountInr: claim.approvedPayout,
+      upiId: claim.policy.profile.upiId,
+      workerName: claim.user.name,
+      workerPhone: claim.policy.profile.phone,
+    });
+
+    if (payoutResult.success && payoutResult.reference) {
+      payoutReference = payoutResult.reference;
+      validationSummary = "Admin approved the claim and payout was sent through the configured payout provider.";
+      if (payoutResult.provider === "mock-fallback" && payoutResult.error) {
+        validationSummary = `Admin approved the claim with payout fallback because provider call failed: ${payoutResult.error}`;
+      }
+    } else {
+      nextStatus = "REVIEW_REQUIRED";
+      payoutReference = null;
+      validationSummary = `Admin approval attempted but payout dispatch failed: ${payoutResult.error ?? "Unknown provider error"}`;
+    }
+  }
 
   await prisma.incomeClaim.update({
     where: { id: claimId },
     data: {
       status: nextStatus,
       payoutReference,
-      validationSummary:
-        action === "APPROVE"
-          ? "Admin approved the claim after manual review and released payout."
-          : action === "BLOCK"
-            ? "Admin blocked the claim after manual review because the payout did not meet validation checks."
-            : "Claim moved back to the review queue for another decision.",
+      validationSummary,
     },
   });
+
+  await refreshTrustScoreForUser(claim.userId);
 
   const payload = await getAdminOperations();
   return {
     ...payload,
     message:
-      action === "APPROVE"
+      action === "APPROVE" && nextStatus === "PAID"
         ? "Claim approved and payout released."
+        : action === "APPROVE"
+          ? "Claim approval recorded but payout dispatch failed and the claim remains in review."
         : action === "BLOCK"
           ? "Claim blocked from payout."
           : "Claim returned to the review queue.",

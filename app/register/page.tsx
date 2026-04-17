@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Shield, Loader2 } from "lucide-react";
 import Link from "next/link";
@@ -7,6 +7,7 @@ import { signIn } from "next-auth/react";
 import { cityZones, platformOptions, vehicleOptions } from "@/lib/platformCatalog";
 
 export default function RegisterPage() {
+  const upiPattern = /^[A-Za-z0-9._-]{2,}@[A-Za-z]{2,}$/;
   const [form, setForm] = useState({
     name: "",
     email: "",
@@ -23,15 +24,119 @@ export default function RegisterPage() {
   });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [availableCities, setAvailableCities] = useState<string[]>(
+    cityZones.map((entry) => entry.city),
+  );
+  const [availableZones, setAvailableZones] = useState<string[]>(cityZones[0].zones);
+  const [citiesLoading, setCitiesLoading] = useState(true);
+  const [zonesLoading, setZonesLoading] = useState(false);
+  const [customZoneMode, setCustomZoneMode] = useState(false);
   const router = useRouter();
 
+  useEffect(() => {
+    let active = true;
+
+    const loadCities = async () => {
+      try {
+        const response = await fetch("/api/location/cities", { cache: "no-store" });
+        const payload = (await response.json()) as { cities?: string[] };
+
+        if (!active || !Array.isArray(payload.cities) || payload.cities.length === 0) {
+          return;
+        }
+
+        const cities = payload.cities;
+
+        setAvailableCities(cities);
+        setForm((f) => {
+          if (cities.includes(f.city)) return f;
+          return { ...f, city: cities[0] ?? f.city, zone: "" };
+        });
+      } catch {
+        // Falls back to default seeded cities already in state.
+      } finally {
+        if (active) setCitiesLoading(false);
+      }
+    };
+
+    void loadCities();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadZones = async () => {
+      const city = form.city.trim();
+      if (!city) {
+        setAvailableZones([]);
+        setCustomZoneMode(true);
+        return;
+      }
+
+      setZonesLoading(true);
+      try {
+        const response = await fetch(`/api/location/zones?city=${encodeURIComponent(city)}`, {
+          cache: "no-store",
+        });
+        const payload = (await response.json()) as { zones?: string[] };
+        const zones = Array.isArray(payload.zones) ? payload.zones : [];
+
+        if (!active) return;
+
+        setAvailableZones(zones);
+        setCustomZoneMode(zones.length === 0);
+
+        if (zones.length === 0) return;
+
+        setForm((f) => {
+          const alreadySelected = zones.some((zone) => zone.toLowerCase() === f.zone.trim().toLowerCase());
+          if (alreadySelected && f.zone.trim()) return f;
+          return { ...f, zone: zones[0] };
+        });
+      } catch {
+        if (!active) return;
+        setAvailableZones([]);
+        setCustomZoneMode(true);
+      } finally {
+        if (active) setZonesLoading(false);
+      }
+    };
+
+    void loadZones();
+
+    return () => {
+      active = false;
+    };
+  }, [form.city]);
+
   const handleRegister = async () => {
+    const payload = {
+      ...form,
+      city: form.city.trim(),
+      zone: form.zone.trim(),
+      upiId: form.upiId.trim(),
+    };
+
+    if (!payload.city || !payload.zone) {
+      setError("City and operating zone are required.");
+      return;
+    }
+
+    if (!upiPattern.test(payload.upiId)) {
+      setError("Enter a valid UPI ID (example: worker@oksbi).");
+      return;
+    }
+
     setLoading(true);
     setError("");
     const res = await fetch("/api/register", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(form),
+      body: JSON.stringify(payload),
     });
     const data = await res.json();
     setLoading(false);
@@ -44,8 +149,6 @@ export default function RegisterPage() {
     router.push("/");
     router.refresh();
   };
-
-  const zonesForCity = cityZones.find((entry) => entry.city === form.city)?.zones ?? cityZones[0].zones;
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background py-8">
@@ -136,25 +239,60 @@ export default function RegisterPage() {
             <label className="block text-xs font-mono text-text-dim uppercase tracking-wider mb-1.5">City</label>
             <select
               value={form.city}
-              onChange={(e) => setForm((f) => ({ ...f, city: e.target.value, zone: cityZones.find((entry) => entry.city === e.target.value)?.zones[0] || "" }))}
+              onChange={(e) => setForm((f) => ({ ...f, city: e.target.value }))}
               className="w-full bg-background border border-border rounded-lg px-3 py-2.5 text-text text-sm focus:outline-none focus:border-accent/60"
+              disabled={citiesLoading}
             >
-              {cityZones.map((entry) => (
-                <option key={entry.city} value={entry.city}>{entry.city}</option>
+              {availableCities.map((city) => (
+                <option key={city} value={city}>{city}</option>
               ))}
             </select>
           </div>
           <div>
             <label className="block text-xs font-mono text-text-dim uppercase tracking-wider mb-1.5">Operating zone</label>
-            <select
-              value={form.zone}
-              onChange={(e) => setForm((f) => ({ ...f, zone: e.target.value }))}
-              className="w-full bg-background border border-border rounded-lg px-3 py-2.5 text-text text-sm focus:outline-none focus:border-accent/60"
-            >
-              {zonesForCity.map((zone) => (
-                <option key={zone} value={zone}>{zone}</option>
-              ))}
-            </select>
+            {!customZoneMode ? (
+              <>
+                <select
+                  value={form.zone}
+                  onChange={(e) => {
+                    if (e.target.value === "__custom__") {
+                      setCustomZoneMode(true);
+                      setForm((f) => ({ ...f, zone: "" }));
+                      return;
+                    }
+                    setForm((f) => ({ ...f, zone: e.target.value }));
+                  }}
+                  className="w-full bg-background border border-border rounded-lg px-3 py-2.5 text-text text-sm focus:outline-none focus:border-accent/60"
+                  disabled={zonesLoading}
+                >
+                  {availableZones.map((zone) => (
+                    <option key={zone} value={zone}>{zone}</option>
+                  ))}
+                  <option value="__custom__">Not listed - enter manually</option>
+                </select>
+              </>
+            ) : (
+              <input
+                type="text"
+                value={form.zone}
+                onChange={(e) => setForm((f) => ({ ...f, zone: e.target.value }))}
+                className="w-full bg-background border border-border rounded-lg px-3 py-2.5 text-text text-sm focus:outline-none focus:border-accent/60"
+                placeholder="Area / locality"
+              />
+            )}
+            {customZoneMode ? (
+              <button
+                type="button"
+                onClick={() => {
+                  if (availableZones.length === 0) return;
+                  setCustomZoneMode(false);
+                  setForm((f) => ({ ...f, zone: availableZones[0] }));
+                }}
+                className="mt-2 text-xs text-accent hover:underline"
+              >
+                Switch back to zone dropdown
+              </button>
+            ) : null}
           </div>
           <div>
             <label className="block text-xs font-mono text-text-dim uppercase tracking-wider mb-1.5">Weekly income (₹)</label>
@@ -192,6 +330,7 @@ export default function RegisterPage() {
               className="w-full bg-background border border-border rounded-lg px-3 py-2.5 text-text text-sm focus:outline-none focus:border-accent/60"
               placeholder="worker@upi"
             />
+            <p className="mt-1 text-[11px] text-text-dim">Required for instant payout simulation (example: worker@oksbi).</p>
           </div>
         </div>
 
