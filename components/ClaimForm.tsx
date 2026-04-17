@@ -49,21 +49,49 @@ export default function ClaimForm() {
     setLoading(true);
     setError("");
 
-    if (!form.policy_bind_date) {
-      setError("Policy bind date is required.");
+    // Basic validation
+    if (!form.age || !form.policy_bind_date || !form.policy_annual_premium) {
+      setError("Please fill in required fields: Age, Policy Bind Date, and Policy Annual Premium.");
       setLoading(false);
       return;
     }
 
-    const payload: Partial<ClaimInput> = {
-      ...form,
+    if (!form.incident_type || !form.collision_type || !form.incident_severity) {
+      setError("Please select incident details.");
+      setLoading(false);
+      return;
+    }
+
+    if (totalClaimAmount === 0) {
+      setError("Please enter claim amounts.");
+      setLoading(false);
+      return;
+    }
+
+    const payload = {
       months_as_customer: monthsAsCustomer,
+      age: toNumber(form.age) || 30,
+      policy_bind_date: form.policy_bind_date,
+      policy_annual_premium: toNumber(form.policy_annual_premium) || 1000,
+      umbrella_limit: toNumber(form.umbrella_limit) || 0,
+      incident_type: form.incident_type || "Single Vehicle Collision",
+      collision_type: form.collision_type || "Front Collision",
+      incident_severity: form.incident_severity || "Minor Damage",
+      authorities_contacted: form.authorities_contacted || "Police",
+      incident_hour_of_the_day: toNumber(form.incident_hour_of_the_day) || 12,
+      number_of_vehicles_involved: toNumber(form.number_of_vehicles_involved) || 1,
+      property_damage: form.property_damage || "NO",
+      bodily_injuries: toNumber(form.bodily_injuries) || 0,
+      witnesses: toNumber(form.witnesses) || 0,
+      police_report_available: form.police_report_available || "NO",
       total_claim_amount: totalClaimAmount,
-      umbrella_limit: toNumber(form.umbrella_limit),
-      bodily_injuries: toNumber(form.bodily_injuries),
-      capital_gains: toNumber(form.capital_gains),
-      capital_loss: toNumber(form.capital_loss),
-      policy_deductable: toNumber(form.policy_deductable || 1000),
+      injury_claim: toNumber(form.injury_claim) || 0,
+      property_claim: toNumber(form.property_claim) || 0,
+      vehicle_claim: toNumber(form.vehicle_claim) || 0,
+      auto_year: toNumber(form.auto_year) || 2020,
+      capital_gains: toNumber(form.capital_gains) || 0,
+      capital_loss: toNumber(form.capital_loss) || 0,
+      policy_deductable: toNumber(form.policy_deductable) || 1000,
     };
 
     try {
