@@ -79,5 +79,131 @@ Our architecture implements AI/ML at two critical junctions:
 * [x] **Phase 2: External API Hookups:** Live city/timezone dropdowns, integration with Open-Meteo for live disruption generation. 
 * [x] **Phase 3: Machine Learning Microservice:** Build, train, and host the Python ML models. Connect the frontend Next.js backend to the FastAPI inference endpoints.
 * [x] **Phase 4: Parametric Automation:** Implement the zero-touch auto-claim generation for policyholders matching localized triggers.
-* [ ] **Phase 5 (Future): Hardening:** Migrate SQLite to PostgreSQL, transition RazorpayX from Sandbox to Live production, and integrate physical GPS pinging.
+* [x] **Phase 5: Manual Claim Submission:** Added UI for manual claim analysis with fraud detection.
+* [ ] **Phase 6 (Future): Hardening:** Migrate SQLite to PostgreSQL, transition RazorpayX from Sandbox to Live production, and integrate physical GPS pinging.
+
+---
+
+## 🚀 Quick Start
+
+### Prerequisites
+- Node.js 18+
+- Python 3.8+
+- Git
+
+### Installation
+
+1. **Clone the repository:**
+   ```bash
+   git clone <your-repo-url>
+   cd fraud-detection
+   ```
+
+2. **Install frontend dependencies:**
+   ```bash
+   npm install
+   ```
+
+3. **Set up the database:**
+   ```bash
+   npx prisma generate
+   npx prisma db push
+   npm run seed
+   ```
+
+4. **Install ML service dependencies:**
+   ```bash
+   cd ml_service
+   pip install -r requirements.txt
+   cd ..
+   ```
+
+5. **Configure environment variables:**
+   Create `.env.local` in the root directory:
+   ```env
+   DATABASE_URL="file:./dev.db"
+   NEXTAUTH_SECRET="your-secret-key"
+   NEXTAUTH_URL="http://localhost:3000"
+   
+   # Optional: For live weather triggers
+   USE_REAL_TRIGGERS=true
+   OPENWEATHER_API_KEY=your-openweather-key
+   AQICN_API_TOKEN=your-aqicn-token
+   ```
+
+### Running the Application
+
+1. **Start the ML service:**
+   ```bash
+   cd ml_service
+   uvicorn main:app --reload --host 0.0.0.0 --port 8000
+   ```
+
+2. **Start the frontend (in a new terminal):**
+   ```bash
+   npm run dev
+   ```
+
+3. **Access the application:**
+   - Frontend: http://localhost:3000
+   - ML API: http://localhost:8000
+
+### Key Features Implemented
+
+- **User Authentication:** Role-based login (admin/worker)
+- **Dashboard:** Real-time metrics, active triggers, claim status
+- **Automated Claims:** Zero-touch payouts based on live weather triggers
+- **Manual Claim Analysis:** Submit claims for ML-powered fraud detection
+- **Admin Panel:** Review flagged claims, manage policies
+- **External API Integration:** Live weather and air quality data
+- **ML Fraud Detection:** Trained on synthetic data with continuous learning
+
+---
+
+## 📊 API Endpoints
+
+### Frontend API Routes
+- `GET /api/dashboard` - User dashboard data
+- `GET/POST /api/claims` - Claim management
+- `POST /api/analyze-claim` - Manual claim fraud analysis
+- `POST /api/policy` - Policy creation
+- `POST /api/register` - User registration
+
+### ML Service Endpoints
+- `GET /` - Service health check
+- `POST /predict` - Fraud prediction for claims
+- `POST /score-income-claim` - Income claim fraud scoring
+- `POST /retrain-income-model` - Model retraining
+
+---
+
+## 🔧 Configuration
+
+### Environment Variables
+- `USE_REAL_TRIGGERS`: Enable live weather API triggers (default: false)
+- `OPENWEATHER_API_KEY`: OpenWeather API key for weather data
+- `AQICN_API_TOKEN`: AQICN API token for air quality data
+- `DATABASE_URL`: Database connection string
+
+### ML Model
+The fraud detection model is trained on synthetic data and includes:
+- 9 key features for income claim analysis
+- Risk scoring (0-100 scale)
+- Continuous retraining capability
+
+---
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Test thoroughly
+5. Submit a pull request
+
+---
+
+## 📄 License
+
+This project is licensed under the MIT License.
 
