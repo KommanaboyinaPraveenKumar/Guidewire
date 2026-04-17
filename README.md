@@ -55,6 +55,7 @@ Our architecture implements AI/ML at two critical junctions:
    * When an auto-claim is generated, it immediately hits our Python ML endpoint (`/score-income-claim`).
    * A pre-trained `LogisticRegression` model processes the claim against 9 unique features (e.g., `payout_ratio`, `recent_claim_count`, `gps_mismatch`, `off_shift_anomaly`, `trust_score`).
    * The model returns a Risk Score (0-100). Low scores auto-approve to the Payment Gateway. High scores are blocked and routed to a human Admin.
+   * **Continuous Learning:** The ML pipeline includes a `/retrain-income-model` webhook. While initially trained on synthetic data, the platform continuously collects real-world human-audited claims and automatically retrains the model (triggering after every 10 new logged claims) to adapt to new fraud patterns.
 
 2. **Dynamic Trust Scoring & Premium Calculation**
    * The system features an algorithmic feedback loop. When the Admin blocks a fraudulent claim, the backend automatically triggers `refreshTrustScoreForUser`. The workers trust score degrades, signaling the `calculateWeeklyQuote` engine to charge them a higher premium to offset the newly discovered risk to the pool.
